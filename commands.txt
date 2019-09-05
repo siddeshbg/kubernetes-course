@@ -1,0 +1,553 @@
+minikube start
+kubectl run hello-minikube --image=gcr.io/google_containers/echoserver:1.4 --port=8080
+kubectl expose deployment hello-minikube --type=NodePort # creating new service for pod, so it could be accessed externally
+minikube service hello-minikube --url
+minikube stop
+
+#K8s enabled thru docker-for-desktop
+kubectl get nodes
+kubectl config get-contexts
+kubectl config use-context docker-for-desktop
+kubectl run hello-k8s --image=gcr.io/google_containers/echoserver:1.4 --port=8080
+kubectl expose deployment hello-k8s --type=NodePort
+kubectl get service hello-k8s
+
+#Building docker image
+cd /Users/siddeshg/work/udemy/docker-demo
+docker build .
+docker images
+docker run -t -p 3000:3000 <image-id>
+docker container ls
+docker stop <container-id>
+docker login
+  Username: siddeshbg
+docker tag deb52e0f39fb  siddeshbg/docker-demo:latest
+docker push siddeshbg/docker-demo:latest
+
+# Deploying on minikube cluster
+cd /Users/siddeshg/work/udemy/kubernetes-course/first-app
+kubectl create -f first-app/helloworld.yml # to send this file to k8s cluster. it launch our 1st pod in cluster
+kubectl get pods
+kubectl describe pod nodehelloworld.example.com
+
+# multiple ways to get into this pod
+kubectl port-forward nodehelloworld.example.com 8081:3000   #8081 is local port 3000 is pod port
+curl localhost:8081
+
+# 2nd way is to create service
+kubectl expose pod nodehelloworld.example.com --type=NodePort --name nodehelloworld-service
+minikube service nodehelloworld-service --url  # to know ip of k8s cluster to connect to
+kubectl get service  # we see the newly created service
+
+#more commands
+kubectl attach nodehelloworld.example.com # to attach to the pod
+kubectl exec nodehelloworld.example.com -- ls /app  # to get into pod
+kubectl logs nodehelloworld.example.com
+kubectl describe service nodehelloworld.example.com
+
+kubectl run -i --tty busybox --image=busybox --restart=Never -- sh # to launch a new pod, it pulls image busybox from docker hub and execute cmd sh in that pod
+
+## Replication controller
+kubectl create -f replication-controller/helloworld-repl-controller.yml
+kubectl delete pod nodehelloworld.example.com
+# scaling - 1st way using file
+kubectl scale --replicas=4 -f replication-controller/helloworld-repl-controller.yml
+# scaling 2nd way using replication service name
+kubectl get rc
+kubectl scale --replicas=1 rc/siddesh-helloworld-rc
+#delete
+kubectl delete rc/siddesh-helloworld-rc
+
+
+## deployments 
+# allows to do app deployments & updates, rolling updates (ZDT), roll back to prev version, pause & resume a deployment (ex. rollout to a certain %)
+
+kubectl create -f deployment/helloworld.yml
+kubectl get deployments # get info on current deployments
+kubectl get rs # get info about replication sets
+kubectl get pods --show-labels # get pods with labels attached
+kubectl rollout status deployment/helloworld-deployment # get deployment status, to know whether deployment is successful
+kubectl expose deployment siddesh-helloworld-deployment --type=NodePort
+kubectl set image deployment/helloworld-deployment k8s-demo=k8s-demo:2 # run k8s-demo with image label version 2 i.e change the image
+or
+kubectl edit deployment/helloworld-deployment # edit the deployment object
+kubectl rollout status deployment/helloworld-deployment # get the rollout history
+kubectl rollout history deployment/helloworld-deployment # get rollout history
+kubectl rollout undo deployment/helloworld-deployment # rollback to prev ver
+kubectl rollout undo deployment/helloworld-deployment --to-revision=n # rollback to any version
+
+kubectl delete deployment siddesh-helloworld-deployment
+
+## Services
+# A service is the logical bridge between the pods and other services or end-users
+# with kubectl expose command, we created new service for our pod, so it could be accessed externally
+# creating a service will create an endpoint for our pods
+# - a clusterIp: a virtual IP address only reachable from within the cluster (this is the default)
+# - a NodePort: a port that is same on each node i.e is also reachable externally
+# - a LoadBalancer: it is created by cloud provider that will route external traffic to every node on the NodePort(AWS ELB)
+# - ExternalName: can provide a DNS name for the service. ex. for service discovery using DNS
+# by default service can only run between ports 30000 - 32767, but u could change this by adding --service-node-port-range= argument to kube-apiserver (in init scripts)
+
+kubectl create -f first-app/helloworld-nodeport-service.yml
+kubect delete svc helloworld-service
+
+# Labels
+kubectl get nodes
+kubectl get nodes --show-labels
+kubectl label nodes minikube environment=qa
+kubectl label nodes minikube hardware=high-spec
+
+# Health checks
+# 2 types of health checks 1) running a cmd in the container periodically 2) periodic checks on a URL (HTTP)
+# in AWS ELB, the health check not checking whether ur pod is healthy, it just checks whether NodePort is accessible
+# define livenessProbe in your deployment yml file. 
+# livenessProbe indicates whether a container is running. If the check fails, the container will be restarted
+kubectl create -f deployment/helloworld-healthcheck.yml
+
+# Readiness Probe
+# it indicates whether the container is ready to serve requests. if the check fails, the containers will not be restarted, but the Pod's IP address will be removed from the service, so it'll not serve any more requests
+
+# Pod state
+# Status field
+# running: pods bound to a node, containers have been created and atleast 1 container running or starting/restarting
+# pending: pod has been accepted but is not running. ex. container image still downloading, resource constraints
+# succeeded: all containers within pod terminated sucessfully & will not be restarted
+# failed: all containers within pod terminated & atleast one container failed
+# unknown: the state of pod couldn't be determined. ex. network error i.e node is down
+
+# pod conditions
+# PodScheduled: pod scheduled to a node
+# Ready: pod can serve requests and is going to be added to matching services
+# Initialized: initialization containers have neen started successfully
+# Unschedulable: pod can't be scheduled. ex. resource constraints
+# ContainersReady: all containers in the pod are ready
+
+# container state
+# running, terminated, waiting
+
+# pod lifecycle
+# init container: to launch new container i.e is separate from the main container. ex. to do some work on volumes
+# post start hook: starts at same time as main container & starts within main container. 
+# pre stop hook: gets executed when container stops. 
+# main container:
+# readiness probe: starts after initialDelaySeconds in main container.  
+# liveness probe: starts after initialDelaySeconds in main container.
+# refer pod-lifecycle/lifecycle.yaml
+
+# secrets
+# it provides a way to distribute credentials, keys, passwords to the pods
+# use secrets as env variables, use it as a file in a pod (via volumes), use an external image to pull secrets (from a private docker registry)
+# To generate secrets using files
+kubectl create secret generic db-user-pass --from-file=./username.txt --from-file=./password.txt
+kubectl create secret generic ssl-certificate --from-file=ssh-privatekey=~/.ssh/id_rsa --ssl-cert=mysslcert.crt
+# To generate secrets using yaml
+# vi secrets-db.yml
+# kubectl create -f secrets-db.yml
+# using secrets
+# via env variable
+
+
+## web ui
+# k8s comes with a web ui you can use instead of kubectl commands
+# use it to get overview of applications running on ur cluster, creating/modifying k8s resources & workloads (like kubectl create and delete), retrieve info of the state of resources (like kubectl describe pod)
+# u can access it at https://<k8s-master>/ui
+# minikube dashboard
+# minikube dashboard --url
+
+# Service discovery
+## DNS 
+# The DNS is a built-in service launched automatically. It can be used within pods to find other services running on same cluster. 
+# Multiple container within 1 pod don't need this service, as they can contact each other directly. A container in the same pod can connect the port of other container directly using localhost:port
+
+kubectl create -f service-discovery/secrets.yml
+kubectl create -f service-discovery/database.yml
+kubectl create -f service-discovery/database-service.yml
+kubectl create -f service-discovery/helloworld-db.yml
+kubectl create -f service-discovery/helloworld-db-service.yml
+
+## ConfigMap
+# Config params that are not secret, can be put in a ConfigMap
+# The input is key-value pairs
+# The ConfigMap key-value pairs can be read by app using: env vars, container cmdline args in the pod config, using volumes
+# A ConfigMap can also contain full config files. E.g an webserver config file. This file can then be mounted using volumes where the application expects its config file
+
+kubectl create configmap nginx-config --from-file=configmap/reverseproxy.conf
+kubectl get configmap
+kubectl get configmap -o yaml
+kubectl create -f configmap/nginx.yml
+kubectl create -f configmap/nginx-service.yml
+minikube service helloworld-nginx-service --url
+curl http://192.168.99.100:30535 -vvvv
+
+kubectl exec -it helloworld-nginx -c nginx -- bash  # we have 2 containers in po d and we are entering into one of the container nginx
+#This example got a nginx infront of helloworld application and nginx forwarding requests
+
+
+# Ingress
+# It allows inbound connections to the cluster. It's an alternative to the external Loadbalancer and nodePorts
+# Ingress allows you to easily expose services that need to be accessible from outside to the cluster
+# With ingress you can run your own ingress controller(basically a loadbalancer) within k8s cluster
+# There are default ingress controllers available or you can write ur own ingress controller
+
+kubectl create -f ingress/ingress.yml
+kubectl create -f ingress/nginx-ingress-controller.yml
+kubectl create -f ingress/echoservice.yml
+kubectl create -f ingress/helloworld-v1.yml
+kubectl create -f ingress/helloworld-v2.yml
+minikube ip
+curl 192.168.99.100
+curl 192.168.99.100 -H 'Host: helloworld-v1.example.com'
+curl 192.168.99.100 -H 'Host: helloworld-v2.example.com'
+
+# External DNS
+# This tool will automatically create the necessary DNS records in ur external DNS server (like route53)
+# For every hostname that you use in ingress, it'll create a new record to send traffic to ur loadbalancer
+# The majaor DNS providers are supported: Google CloudDNS, Route53, AzureDNS
+
+# Persistent Volumes
+# It allows to attach a volume to a container that will exists even when the container stops
+# A volume can be attached to a container in a pod
+# Even we can attach a EBS disks as volumes
+# volumes can be attached using different volume plugins
+# using volumes you could deploy applications with state on ur cluster
+# Refer volumes/helloworld-with-volume.yml
+# K8s plugins have the capabilty to provision storage for you. The AWS plugin can provision storage for u by creating the volumes in AWS before attaching them to a node. This is done using the StorageClass object. 
+# You can create a volume clain and specify the size. Refer 
+
+# Pod Presets
+# It can inject information into pods at runtime. It is used to inject K8s resources like secrets, ConfigMaps, Volumes and Env vars
+# Create 1 preset object, which will inject an env var or config file to all matchine pods. 
+# When injecting env vars and volume mounts, the Pod preset will apply the changes to all containers within the pod
+# ex. pod-presets/pod-presets.yaml 
+# You can use more than one PodPreset, they'll all be applied to matching Pods. If there's a conflict, the PodPreset will not be applied to the pod
+# PodPresets can match zero or mode pods. It's possible that no pods are currently matching, but that matching pods will be launched at a later time.
+minikube start --extra-config=apiserver.runtime-config=settings.k8s.io/v1alpha1=true
+kubectl create -f pod-presets/pod-presets.yaml
+kubectl get podpresets
+kubectl create -f pod-presets/deployments.yaml
+kubectl describe pod deployment-2-6d8494c494-9lm5r|less
+
+# StatefulSets
+# It is introduced to run stateful applications. That need a stable pod hostname (instead of podname-randomstring)
+# Pod name will have a sticky identity, using an index. ex. podname-0, podname-1 and podname-2 and when pod gets rescheduled, it'll keep that identity.
+# Statefulsets allow stateful apps stable storage with volumes based on their ordinal number(podname-x). Deleting or scaling a StatefulSet down will not delete the volumes associated with the StatefulSet
+# A StatefulSet will allow ur stateful app to use DNS to find other peers. 
+# If you wouldn't use statefulset, you would get dynamic hostname, which you wouldn't be able to use in ur config files, as the name always change.
+# A StatefulSet will also allow ur stateful app to order the startup and teardown. when scaling up it goes from 0 to n-1. when scaling down it starts with the highest number n-1 to 0
+kubectl create -f statefulset/cassandra.yaml
+kubectl exec -it cassandra-0 -- nodetool status
+kubectl exec -it cassandra-0 -- ping cassandra-1.cassandra
+
+kubectl delete statefulset cassandra
+
+# Daemon Sets
+# It ensures every single node in the K8s cluster runs the same pod resource. This is useful if you want to ensure that a certain pod is running on every single k8s node
+# When a node is added to the cluster, a new pod will be started automatically. When a node is removed, the pod will not be rescheduled on another node
+# Usecases: Logging aggregators, monitoring, Load Balancers / Reverse Proxies / API Gateways
+
+kubectl get daemonset
+kubectl delete daemonset nginx-ingress-controller
+
+# Resource Usage Monitoring
+# Heapster enables Container Cluster Monitoring and Performance Analysis. It's providing a monitoring platform for Kubernetes
+# It's a prerequisite for pod auto-scaling in K8s.
+# Heapster exports clusters metrics via REST endpoints
+# You can use different backends with Heapster - InfluxDB, Google Cloud Monitoring/Logging and Kafka
+# Visualizations (graphs) can be shown using Grafana. The K8s dashboard will also show graphs once monitoring is enabled. 
+# All these technolgies (Heapster, InfluxDB & Grafana) can be started in pods. The yaml files can be found on the github repo of Heapster https://github.com/kubernetes-retired/heapster/tree/master/influxdb
+# After downloading repo, the whole platform can be deployed using kubectl create -f dir-with-yaml-files/
+# Heapster is DEPRICATED. Now Metrics Server came out, that you can use.
+# Metrics Server is a strip down version of Heapster. It's very similar, but u can't extract any metrics from it. You can't sync it to influxDB & show ur metrics in Grafana.
+# Now if you want to show external metrics, it's unclear how you have to do it. You have to use 3rd party tool like Prometheus
+cd metrics-server/
+kubectl create -f .
+kubectl top node
+kubectl top pod
+
+# Autoscaling (horizontal pod autoscaling)
+# K8s can automatically scale pods based on metrics. It can automatically scale Deployment, Replication Controller or ReplicaSet. scaling based on CPU usage is possible
+# Autoscaling will periodically query the utilization of the targeted pods. By default every 30 secs
+# Autoscaling use heapster, the monitoring tool, to gather its metrics & make scaling decisions. Heapster must be installed & running before autoscaling will work
+# Ex. Horizpntal autoscaling will increase/decrease pods to maintain a target cpu utilization of 50%
+cd autoscaling
+kubectl create -f hpa-example.yml
+kubectl get hpa
+kubectl delete hpa hpa-example-autoscaler
+
+# Affinity and anti-affinity
+# used to schedule pod deployment on specific nodes. It is similar to nodeSelector.
+# In nodeSelector, if nodes with given label not exist, the pods doesn't get scheduled. But in affinity, the scheduler will still schedule ur pod, even if the rules cannot be met
+# K8s can do node affinity and pod affinity/anti-affinity. Node affinity is similar to nodeSelector
+# Pod affinity/anti-affinity allows you to create rules how pods should be scheduled taking into a/c other running pods. Ex. You can create rule like, 2 different pods will never be on same node
+# 2 types u can use node affinity
+# 1) requiredDuringSchedulingIgnoredDuringExecution: It sets a hard requirement like nodeSelector. The rules must be met before pod can be scheduled
+# 2) prefferedDuringSchedulingIgnoredDuringExecution: It'll try to enforce rule, but it'll not guarantee it. Even if the rule is not met, the pod can still be scheduled. It's a soft requirement, a preference
+
+kubectl create -f affinity/node-affinity.yaml
+kubectl label node minikube env=dev
+
+
+# Interpod Affinity and anti-affinity
+- This allows u to influence scheduling based on the labels of other pods that are already running on the cluster
+- Pods belong to namespace, so ur affinity rules will apply to a specific namespace
+- u have 2 types of pod Affinity and anti-affinity
+ 1) requiredDuringSchedulingIgnoredDuringExecution: create rules that must be met for pod to be scheduled
+ 2) prefferedDuringSchedulingIgnoredDuringExecution: it is a soft type & the rules may be met
+- usecase: co-located pods
+ - U might want that 1 pod is always co-located on the same node with another pod.
+ - Ex. u have an app that uses redis as cache & u want to have the redis pod on the same node as the app itself
+
+- pod anti-affinity: u can use anti-affinity to make sure a pod is only scheduled once on a node
+ - Ex. u have 3 nodes & u want to schedule 2 pods, but they shouldn't be scheduled on the same node
+- u can use operators In, NotIn. Exists, DoesNotExist
+kubectl create -f affinity/pod-affinity.yaml
+kubectl get pods -o wide
+kubectl delete -f affinity/pod-affinity.yaml
+
+# Taints and Tolerations
+- Tolerations is the opposite of node affinity. Tolerations allow a node to repel a set of pods
+- Taints mark a node, tolerations are applied to pods to influence the scheduling of the pods
+- Usecase for taint is to make sure, a new pod not scheduled on master
+    - To add a new taint to node, u can use kubectl taint - kubectl taint nodes node1 key=value:NoSchedule
+- Usecase: Taint nodes that are dedicated for a team or a user
+- If u have few nodes with specific h/w (ex. GPUs), u can taint them to avoid running on non-specific applications on those nodes
+- taint nodes by condition -> this will automatically taint nodes that have node problems.
+cd tolderations
+kubectl taint nodes minikube type=specialnode:NoSchedule
+kubectl create -f tolerations.yaml
+kubectl get pod -o wide
+
+To remove taint, use - sign at end
+kubectl taint nodes minikube specialnode-
+
+# Custom Resource Definitions (CRD)
+- It lets u extend the K8s API
+- Resources are the endpoints in K8s API that store collections of API objects
+ - Ex. there is built-in Deployment resource, that u can use to deploy applications
+ - In yaml files, u describe the object, using the Deployment resource type
+ - You create the object on the cluster by using kubectl
+- A Custom Resource is a resource that u add to ur cluster, it's not available on every cluster
+- It's an extension of K8s API.
+- Custom resources are also described in yaml files
+- As an admin you can dynamically add CRDs to ad extra functionality to ur cluster
+- Operators use these CRDs to extend the K8s API with their own functionality
+
+# Operators
+ #  An Operator is a method of packing, deploying & managing a k8s application
+ # It puts operational knowledge in an application
+  # It brings the user closer to the experience of managed cloud services
+  # Once an operator is deployed, it can be managed using Custom Resource Definitions (CRD)
+ # It also provides a great way to deploy Stateful services on K8s, coz a lot of complexities can be hidden from end-user
+ # Any third-party can create operators that you can start using
+ # There are operators for Prometheus, Vault, Rook(Storage), Mysql, PostgreSQL, etc
+ # List of K8s operators: https://kubedex.com/operators/
+ # Ex: using an operator for PostgreSQL.
+ # If u just deploy a PostgreSQL container, it'd only start the database.
+ # If ur going to use this PostgreSQL operator, it'll allow you to create replicas, initiate a failover, create backups, scale
+  # An operator contains a lot of management logic that u as an administrator or user might want, rather than having to implement it urself
+ # https://github.com/CrunchyData/postgres-operator
+cd postgres-operator
+kubectl create -f storage.yml
+./quickstart-for-gke.sh
+kubectl port-forward postgres-operator-757b5***** 18443:8443
+./set-path.sh
+pgo version
+pgo create cluster mycluster
+pgo show cluster all
+kubectl get pod
+
+
+# Master services
+ # kubectl talks with master's REST interface after authorization
+ # k8s save objects (ex. pod definition) in etcd
+ # KubeAPI server: This REST API is called kubeapi server
+ # Scheduler: There is scheduler that communicates with REST interface, it schedules pod's that are not scheduled yet
+ # Controller Manager: It's a collection of controllers, ex. node controller to discover new nodes, replication controller managing replicas of pods
+ # kubelet: This REST interface communicates with kubelet found in nodes
+
+# Resource Quotas
+ # u can enable resource quotas on namespaces
+ # Each container can specify 'request capacity' & 'capacity limits'
+  # Request capacity is an explicit request for resources
+   # The scheduler can use the request capacity to make decisions on where to put the pod on
+   # You can see it as a minimum amt of resources the pod needs
+  # Resource limit is a limit imposed to the container
+   # The container will not be able to utilize more resources than specified
+  # Example of resource quotas:
+   # u run a deployment with a pod with a cpu resource request of 200m
+    # 200m = 200 millicpu => 0.2, which is 20% of a CPU core of the running node
+   # You can also put a upper limit, eg 400m
+   # memory quotas are defined by MiB or GiB
+
+# Namespaces
+ # It allows u to create virtual clusters within the same physical cluster
+ # Namespaces logically separates ur cluster
+ # The default namespace is called 'default'
+ # The k8s specific resources launced under namespace 'kube-system'
+ # The name of the resources need to be unique within a namespace, but not across namespaces
+ # U can divide resources of k8s cluster using namespaces
+  # u can limit resources on a per namespace basis
+
+kubectl create namespace myspace # to create a new namespace
+kubectl get namespaces # to list namespaces
+
+# You can set a default namespace to launch resources in
+export CONTEXT=$(kubectl config view|awk '/current-context/{print $2}')
+kubectl config set-context $CONTEXT --namespace=myspace
+
+kubectl config set-context --current --namespace=<insert-namespace-name-here>
+
+# setting resource limits on namespace
+cd resourcequotas/
+kubectl create -f resourcequotas/resourcequota.yml
+kubectl create -f resourcequotas/helloworld-no-quotas.yml
+kubectl get deploy --namespace=myspace
+kubectl get rs  --namespace=myspace
+kubectl describe rs helloworld-deployment-748f49d795 --namespace=myspace
+kubectl delete deploy/helloworld-deployment --namespace=myspace
+
+kubectl create -f resourcequotas/helloworld-with-quotas.yml
+kubectl get pod --namespace=myspace
+kubectl describe rs helloworld-deployment-748f49d795 --namespace=myspace
+kubectl describe rs/helloworld-deployment-588cb4f97b --namespace=myspace
+kubectl get quota  --namespace=myspace
+kubectl describe quota/compute-quota -n=myspace
+kubectl delete deploy/helloworld-deployment -n=myspace
+
+kubectl create -f resourcequotas/defaults.yml
+kubectl describe limits mylimits -n=myspace
+kubectl create -f resourcequotas/helloworld-no-quotas.yml
+
+# User Management
+ # 2 types of users u can create
+  # normal user: used to access the user externally.
+   # e.g thru kubectl
+   # This user is not managed using objects
+   # after a normal user authenticates, it will have access to everything. To limit access, u need to configure authorization, like RBAC (role-based access control)
+  # Service user: managed by an object in k8s
+   # This type of user is used to authenticate within the cluster
+   # e.g from inside a pod or from a kubelet
+   # These credentials are managed using Secrets
+ #Adding user
+
+minikube ssh # to ssh into the cluster
+openssl genrsa -out siddesh.pem 2048 # creates new key
+openssl req -new -key siddesh.pem -out siddesh-csr.pem -subj "/CN=siddesh/O=myteam/" # create new certificate request
+# use ca certficate & ca key to create new certificate, that us signed by authority. This way u'll be able to use siddesh.crt to authenticate to the api server
+
+# RBAC
+ # for Authorization.
+ # The access controls are implemented at API level (kube-apiserver)
+ # when a api request comes in (ex. kubectl get nodes), it will be checked to see whether you have access to execute this cmd
+ # There are multiple authorization module available: 1) Node 2) ABAC 3) RBAC 4) Webhook
+ # RBAC - Role based access controlm regulates access using roles
+minikube start --extra-config=apiserver.Authorization.Mode=RBAC
+ # First u define a role, then assign users/groups to that role
+ # u can create roles limited to a namespace or u can create roles where the access applies to all namespaces
+cd users
+kubectl create -f admin-user.yaml
+kubectl create -f user.yaml
+
+# Networking
+ # Container to container communication within a pod thru localhost & the port number
+ # Pod-To-Service communication using NodePort, using DNS
+ # External-To-Service using LoadBalancer, NodePort
+ # Pod-to-Pod communications: K8s assumes that pods should be able to communicate to other pods, regardless of which node they are running
+  # Every pod has it's own IP.
+  # Pods on different nodes can communicate to each other using those IP
+  # This is implemented differently depending on ur n/w setup.
+  # On AWS: kubenet networking (kops default)
+   # Every pod can get an IP i.e is routable using the AWS Virtual Private Network (VPC)
+   # The k8s master allocates a /24 subnet to each node (254 IP addresses)
+   # This subnet is added to the VPCs route table
+   # There is a limit of 50 entries, i.e u can't have more that 50 nodes in a single AWS cluster
+  # There are alternatives available for onprem
+   # CNI (Container Network Interface): Ex. Calico, Weave
+   # Overlay network: Ex. Flannel. Flannel acts as network gateway between nodes
+
+# Node maintenance
+ # Node Controller is responsible for managing the Node objects
+ # It assigns IP space to the node when a new node is launced
+ # It keeps the node list up to date with the available machines
+ # It also monitors the health of the node. If a node is unhealthy,it gets deleted. Pods running on unhealthy node will then get rescheduled
+ # When adding a new node, the kubelet will attempt to register itself. This is called self-registration (default).
+ # When u decommission a node, u drain a node before u shut it down
+ # To drain a node
+ kubectl drain nodename --force --grace-period=600
+
+# High Availability
+ # The HA setup looks like this:
+  # Clustering etcs: at least run 3 etcd nodes
+  # Relplicated API servers with LoadBalancer
+  # Running multiple instances of the scheduler & the controllers
+
+# TLS on AWS ELB
+ # Used to enable access logs on load balancer
+cd elb-tls
+
+# Packaging and Deploying
+# Helm
+ # Helm is a package manager for K8s. It helps u to manage k8s applications.
+ # Helm is maintained by CNCF ( together with k8s, fluentd, linkerd & others)
+ # download the helm client
+ # u need to run 'helm init' to initialize helm on the k8s cluster
+  # This will install Tiller
+  # If u have RBAC installed (recent clusters have it enabled by default), u'll also need to add a ServiceAccount and RBAC rules
+ # After this helm is ready for use & u can start installing charts
+# Charts
+ # Helm uses a packaging format called charts
+ # A chart is a collection of files that describe a set of k8s resources (yml files)
+ # A single chart can deploy an app, a piece of s/w or a DB.
+ # It can have dependencies, e.g to install wordpress chart, u need a mysql chart
+ # u can write ur own chart to deploy ur application on k8s using helm
+ # Charts use templates that are typically developed by a package manager
+ # They will generate yaml files that K8s understands. u can think templates as dynamic yaml files, which contain logic & variables
+ # Ex of template
+ apiVersion: v1
+ kind: ConfigMap
+ metadata:
+    name: {{ .Release.Name }}-configmap
+ data:
+    myvalue: "Hello World"
+    drink: {{ .Values.favoriteDrink }}
+ # The favoriteDrink value can then be overridden by the user when running helm install
+
+ # Commands
+  # helm init -> Install tiller on the cluster
+  # helm reset -> Remove tiller from the cluster
+  # helm install -> Install a helm chart
+  # helm search -> search for a chart
+  # helm list -> list releases (installed charts)
+  # helm upgrade -> upgrade a release
+  # helm rollback -> rollback a release to the previous version
+cd helm
+brew install kubernetes-helm
+
+kubectl create -f helm-rbac.yaml  # create service a/c and provide it admin access
+helm init --service-account tiller # it will install helm on the cluster
+kubectl get pods -n kube-system  # u'll find a new tiller pod
+
+helm search redis
+helm search jenkins
+
+helm install stable/redis
+OR helm install --name myredis stable/redis
+
+export REDIS_PASSWORD=$(kubectl get secret --namespace default understood-greyhound-redis -o jsonpath="{.data.redis-password}" | base64 --decode)
+kubectl run --namespace default understood-greyhound-redis-client --rm --tty -i --restart='Never' --env REDIS_PASSWORD=$REDIS_PASSWORD  --image docker.io/bitnami/redis:5.0.5-debian-9-r104 -- bash
+echo $REDIS_PASSWORD
+redis-cli -h understood-greyhound-redis-master -a $REDIS_PASSWORD
+help
+set mykey myvalue
+get mykey
+quit
+exit # if u stop this pod, data is preserved. This chart configured pvc
+kubectl get pvc
+
+helm delete understood-greyhound
+
+# Creating ur own Helm charts
+
+
+
+
